@@ -1,5 +1,16 @@
 # obsidian-calendar-plugin
 
+> **⚠️ This is a FORK.** It extends the original Calendar plugin so clicking the
+> grid creates-or-opens a configurable **time-hierarchy** of notes
+> (Year/Month/Week/Day), instead of only daily notes. If you are here to
+> understand or modify the code, **start with [`AGENTS.md`](./AGENTS.md)** (rules
+> + build/test/deploy) and **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** (how it
+> works, with diagrams). [`HUB_FEATURE.md`](./HUB_FEATURE.md) has the feature
+> summary + manual UI checklist. The sections below are the *original* upstream
+> README and describe the pre-fork daily-notes behaviour.
+
+---
+
 This plugin for [Obsidian](https://obsidian.md/) creates a simple Calendar view for visualizing and navigating between your daily notes.
 
 ![screenshot-full](https://raw.githubusercontent.com/liamcain/obsidian-calendar-plugin/master/images/screenshot-full.png)
