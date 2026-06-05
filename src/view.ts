@@ -7,8 +7,8 @@ import { FileView, TFile, ItemView, WorkspaceLeaf } from "obsidian";
 
 import { TRIGGER_ON_OPEN, VIEW_TYPE_CALENDAR } from "src/constants";
 import { createOrOpenHub } from "src/core/noteService";
-import { dayPaths, weekPaths, PeriodKind } from "src/core/periods";
-import type { ISettings } from "src/settings";
+import { planFor } from "src/core/plan";
+import type { ISettings, PeriodKind } from "src/types";
 
 import Calendar from "./ui/Calendar.svelte";
 import { showCellMenu } from "./ui/contextMenu";
@@ -106,16 +106,13 @@ export default class CalendarView extends ItemView {
     if (!isMetaPressed) {
       return;
     }
-    const paths =
-      period === "day"
-        ? dayPaths(date, { root: this.settings.hubRoot })
-        : weekPaths(date, { root: this.settings.hubRoot });
+    const plan = planFor(period, date, this.settings);
     this.app.workspace.trigger(
       "link-hover",
       this,
       targetEl,
-      paths.fileName,
-      `${paths.destPath}.md`
+      plan.fileName,
+      `${plan.destPath}.md`
     );
   }
 

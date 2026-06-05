@@ -2,6 +2,7 @@ import type { Moment, WeekSpec } from "moment";
 import { App, Plugin, WorkspaceLeaf } from "obsidian";
 
 import { VIEW_TYPE_CALENDAR } from "./constants";
+import { mergeSettings } from "./core/mergeOptions";
 import { settings } from "./ui/stores";
 import {
   appHasPeriodicNotesPluginLoaded,
@@ -93,13 +94,10 @@ export default class CalendarPlugin extends Plugin {
   }
 
   async loadOptions(): Promise<void> {
-    const options = await this.loadData();
-    settings.update((old) => {
-      return {
-        ...old,
-        ...(options || {}),
-      };
-    });
+    // Start from generic defaults; copy ONLY recognised keys from the saved
+    // data.json (pruning stale keys), deep-merging object-valued settings.
+    const saved = await this.loadData();
+    settings.update(() => mergeSettings(saved));
 
     await this.saveData(this.options);
   }

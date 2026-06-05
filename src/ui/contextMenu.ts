@@ -2,8 +2,8 @@ import type { Moment } from "moment";
 import { App, Menu, Point, TFile } from "obsidian";
 
 import { createOrOpenHub, createOrOpenOverview } from "src/core/noteService";
-import { pathsFor, PeriodKind } from "src/core/periods";
-import type { ISettings } from "src/settings";
+import { planFor } from "src/core/plan";
+import type { ISettings, PeriodKind } from "src/types";
 
 /** Which kind of calendar cell was right-clicked. */
 export type CellKind = "day" | "week";
@@ -27,8 +27,8 @@ interface MenuItemDef {
 
 /** Reveal a period's HUB note in the file-explorer, if it exists. */
 function revealHub(ctx: MenuContext, period: PeriodKind): void {
-  const paths = pathsFor(period, ctx.date, { root: ctx.settings.hubRoot });
-  const file = ctx.app.vault.getAbstractFileByPath(`${paths.destPath}.md`);
+  const plan = planFor(period, ctx.date, ctx.settings);
+  const file = ctx.app.vault.getAbstractFileByPath(`${plan.destPath}.md`);
   if (!file) {
     return;
   }

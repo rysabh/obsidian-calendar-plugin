@@ -10,7 +10,7 @@
   import { onDestroy } from "svelte";
 
   import type { ISettings } from "src/settings";
-  import { activeFile, dailyNotes, settings, weeklyNotes } from "./stores";
+  import { activeFile, settings } from "./stores";
 
   let today: Moment;
 
@@ -33,8 +33,6 @@
 
   function getToday(settings: ISettings) {
     configureGlobalMomentLocale(settings.localeOverride, settings.weekStart);
-    dailyNotes.reindex();
-    weeklyNotes.reindex();
     return window.moment();
   }
 

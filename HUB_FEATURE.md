@@ -1,93 +1,88 @@
 # Calendar → Time-Hierarchy HUB feature (fork)
 
-Clicking the calendar grid creates-or-opens nested `_HUB_*` notes
-(Year / Month / Week / Day). The calendar plugin and the Templater `MT_*`
-templates are **two fully independent systems** — neither depends on the other,
-no shared file, no shared API. They produce the same layout because each
-implements the same documented naming rules; a small, deliberate duplication of
-the rule that keeps each robust on its own.
+Clicking the calendar grid creates-or-opens nested time notes (Year / Month /
+Week / Day, plus a right-click day Overview). All naming, paths, formats, and
+which frontmatter fields get computed are driven from the plugin's own settings —
+it works in any vault. The Templater `MT_*` templates remain a **separate,
+independent** way to make the same notes; nothing is shared between them.
 
-## Calendar plugin — self-contained, works in any vault
+## Architecture — one small computation engine
 
-- **All config lives in the plugin's own settings** (the settings tab →
-  `data.json`). Source of truth; nothing external. Configurable per vault.
-- **New-note bodies come from STATIC seed templates** (plain notes with no
-  computation), configured in settings — defaults in
-  `…/Obsidian_Templates/Static/ST_HUB_{Day,Week,Month,Year}.md` and
-  `ST_Overview_Day.md`. The plugin writes the seed verbatim, then fills the only
-  dynamic bits — the note `name` and its parent `related_notes` link — via
-  Obsidian's frontmatter API.
-- **It computes paths itself** in `src/core/periods.ts` (pure, unit-tested).
+Pure functions in the middle, I/O at the edge. To change a behaviour you edit one
+block:
+
+```mermaid
+flowchart TD
+    S["settings.ts + defaults.ts<br/><b>CONFIG</b><br/>root | formats | patterns | computed fields | templates"]
+    A["core/anchors.ts<br/><b>DATE MATH</b><br/>date+period -> token values (ISO, START-month)"]
+    R["core/resolve.ts<br/><b>RESOLVE</b><br/>{token} pattern -> text (the one primitive)"]
+    P["core/plan.ts<br/><b>COMPOSE</b><br/>-> NotePlan {folderPath, fileName, fields}"]
+    F["core/fields.ts<br/><b>FIELD FILL</b><br/>write computed values into the copied template"]
+    N["core/noteService.ts<br/><b>WRITER + ERRORS</b><br/>create-or-open | folders | Notice on failure"]
+    U["view.ts | ui/contextMenu.ts | ui/sources/hubExists.ts | vendor/calendar-ui<br/><b>UI</b>"]
+    S --> A --> R --> P --> N
+    P --> F --> N
+    U --> P
+    U --> N
+```
 
 | Concern | File |
 |---|---|
-| Path / naming logic (plugin's own copy) | `src/core/periods.ts` |
-| Create-or-open + seed + frontmatter fill | `src/core/noteService.ts` |
-| All settings | `src/settings.ts` |
-| Context-menu registry (one place → handlers) | `src/ui/contextMenu.ts` |
-| Binary "hub exists" cue | `src/ui/sources/hubExists.ts` |
-| View wiring (clicks, hover, menus) | `src/view.ts` |
-| Vendored UI (0.3.12) + clickable month/year header | `src/vendor/calendar-ui/` |
+| All settings values (the ONE place to edit defaults) | `src/defaults.ts` |
+| Settings schema (types) | `src/types.ts` |
+| Settings tab UI (+ path ✓/✗, reset, computed-fields editor) | `src/settings.ts` |
+| Date math (ISO week, START-month) → token values | `src/core/anchors.ts` |
+| `{token}` pattern resolution + validation | `src/core/resolve.ts` |
+| Compose a NotePlan (paths, file, computed fields) | `src/core/plan.ts` |
+| Write computed values into a copied template | `src/core/fields.ts` |
+| Create-or-open + folders + error Notices | `src/core/noteService.ts` |
+| data.json upgrade/prune (drop stale keys) | `src/core/mergeOptions.ts` |
+| Clicks, hover, right-click menu, "hub exists" cue | `src/view.ts`, `src/ui/…` |
 
-## Templater — its own thing, modified only for the new naming
+## Naming model
 
-The original `MT_*` templates are restored and **surgically** updated so their
-self-contained heads place weeks by the START-month rule and name them with the
-ISO week id (matching the plugin's layout). Month and Year templates are
-unchanged. They call nothing in the plugin.
+- **Tokens:** `{prefix} {Kind} {year} {month} {day} {weekId} {weekRange}` plus a
+  raw `{date:MOMENT_FORMAT}` escape hatch. Date tokens' formats are configurable.
+- **Patterns** (per period) build the folder, the file name, and each computed
+  frontmatter field. The START-month + ISO math stays in code (`anchors.ts`); only
+  the arrangement of tokens is configurable, so paths can't be silently broken.
+- **Templates are optional** (default off; none are shipped). Off → an empty note
+  with the computed name. On → the template file is copied whole and only the
+  listed computed fields are overwritten.
+- **Generic defaults:** root `Calendar`, prefix `_HUB_`, ISO weeks, templates off.
+  A specific vault's layout lives in its `data.json` / the settings tab — see
+  `0_Inbox/adjust_calendar_settting.md` in the vault for a worked mapping.
 
-## Naming rules (both systems implement these)
-
-- Week starts **Monday** (ISO). A week and **all its days** nest under the
-  calendar Year/Month of the week's **start** (START-month rule).
-- Week folder/file use the **ISO** week number + ISO week-year, zero-padded:
-  `Week_18_2026`, `_HUB_Week_18_2026`. The human range (`Apr27-May03_2026`) is
-  kept in the note's `name:` field for search.
-- Boundary example: Mon 2025-12-29 → `Year_2025/Month_Dec_2025/Week_01_2026/`.
-
-Verified: executing the actual template heads and the plugin's `periods.ts` for
-the same dates produces identical paths (incl. `2026-05-01`, `2025-12-29`).
-
-## Build & deploy
+## Build, test & deploy
 
 ```
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 24
 npm install        # if node_modules absent
-npm run build      # svelte-check + eslint + rollup  (or: npx rollup -c)
-npx jest           # path/naming unit tests
+npx jest           # pure-logic + real-template + prune tests
+npm run build      # svelte-check + eslint + rollup  -> main.js
 # deploy: back up the vault main.js, then copy main.js + manifest.json into
 #   <vault>/.obsidian/plugins/calendar/
 ```
-The svelte-check `lib/mappings.wasm` lines under Node 24 are a harmless
-source-map quirk — it still reports "0 errors". No `styles.css` is produced;
-component CSS (incl. cues) is JS-injected.
+svelte-check emits harmless `lib/mappings.wasm` source-map lines under Node 24 but
+reports "0 errors". Component CSS (incl. the cue) is JS-injected; no styles.css.
 
 ## Manual UI verification (must be done in Obsidian)
 
-Reload Obsidian after deploying, then:
+Reload/restart Obsidian after deploying, then:
 
 - [ ] **Panel renders / no console errors** (devtools, Ctrl/Cmd+Shift+I).
-- [ ] **Day create/open:** click an empty day → confirm modal → creates
-      `_HUB_Day_<MMMDD_YYYY>.md` at the nested path. **Open it and check the
-      frontmatter: `name:` is the file name AND `related_notes:` is the parent
-      `[[_HUB_Week_<WW>_<YYYY>]]`** (both must be populated, not the
-      `_MOC_Templates` placeholder). Click again → just opens (no duplicate).
-- [ ] **Week (same- & cross-month):** click a week number → `_HUB_Week_<WW>_<YYYY>.md`
-      with `name:` = the human range; a May day of the Apr-start week nests under
-      `Month_Apr_…` (START-month).
-- [ ] **Header month/year:** click "Apr"/"2026" → Month/Year HUB for the
-      *displayed* period.
-- [ ] **Cues / context menu / hover** work; the Overview menu item creates
-      `_Overview_Day_<…>.md`.
-- [ ] **Templater unchanged workflow:** applying `MT_HUB_Day_Today` / `MT_HUB_Week`
-      etc. produces the SAME paths as a calendar click — with NO calendar plugin
-      involvement.
-- [ ] **Settings page** reads coherently (Calendar; Time Hierarchy).
-
-### Known limitations (not blocking)
-- The active-cell highlight uses the daily-notes filename parser and won't track
-  custom `_HUB_Day_*` names. Cosmetic.
-- Legacy 2025 range-named weeks are not migrated. Calendar clicks OPEN an
-  existing range-named week instead of duplicating it; the Week template lacks
-  that guard, so only manually-apply it for current/future weeks. Migration, if
-  wanted, is a manual one-off (rename folders/files; Obsidian updates links).
+- [ ] **Day create/open:** click an empty day → confirm → creates the nested
+      `…/Day_<…>/_HUB_Day_<…>.md`. Open it: `name:` and `related_notes:` (parent
+      week) are filled; the rest of the template is intact. Click again → just
+      opens (no duplicate).
+- [ ] **Missing template surfaces a Notice:** temporarily set a wrong Day template
+      path in settings (it shows ✗) → click → a Notice names the bad path (no more
+      silent failure). Restore the path.
+- [ ] **Week / Month / Year** clicks create the right notes; a cross-month week
+      (e.g. a May day of an Apr-start week) nests under the Apr month (START-month).
+- [ ] **Settings:** change *Day date format* to `MMM_DD_YYYY` → a new day note is
+      `…_Day_Jun_04_2026`. *Reset all settings to defaults* restores generics.
+- [ ] **Templates off:** turn *Use templates* off → a click creates an empty note
+      with the correct name/location.
+- [ ] **Cues / right-click menu / hover** work; the Overview menu item creates the
+      `_Overview_Day_<…>` note.

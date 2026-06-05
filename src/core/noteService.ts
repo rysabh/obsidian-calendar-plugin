@@ -1,20 +1,26 @@
+/**
+ * noteService.ts — WRITER + façade (the only I/O in the engine).
+ *
+ * Public API used by the UI:
+ *   - createOrOpenHub      (left-click a day/week/month/year)
+ *   - createOrOpenOverview (right-click → day Overview)
+ *   - hubExists            (binary "hub exists" cue)
+ *
+ * Behaviour: open the note if it exists; else (optionally behind a confirm modal)
+ * create it and open it. Create = copy the template (if templating is on) →
+ * replace the computed fields → make folders (if the hierarchy toggle is on) →
+ * create + open. Any failure (e.g. a template path that does not exist) surfaces
+ * a Notice instead of failing silently.
+ */
 import type { Moment } from "moment";
-import type { App, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 
-import type { ISettings } from "src/settings";
+import type { ISettings, PeriodKind } from "src/types";
 import { createConfirmationDialog } from "src/ui/modal";
 
-import {
-  PeriodKind,
-  PeriodPaths,
-  pathsFor,
-  overviewPaths,
-  weekRange,
-  startOfIsoWeek,
-} from "./periods";
-import { fillSeedIdentity } from "./seed";
+import { applyFields } from "./fields";
+import { NotePlan, overviewPlan, planFor } from "./plan";
 
-/** Human label for each period, used in the confirmation modal. */
 const PERIOD_LABEL: Record<PeriodKind, string> = {
   day: "Day HUB",
   week: "Week HUB",
@@ -22,20 +28,7 @@ const PERIOD_LABEL: Record<PeriodKind, string> = {
   year: "Year HUB",
 };
 
-/** Resolve the configured STATIC seed template path for a period. */
-function templatePathFor(period: PeriodKind, settings: ISettings): string {
-  return settings.hubTemplates[period];
-}
-
-/** `${root}` as the path config the period functions expect. */
-function pathConfig(settings: ISettings) {
-  return { root: settings.hubRoot };
-}
-
-/**
- * Create each missing folder in `folderPath`, segment by segment.
- * (Uses the vault adapter so it works regardless of metadata-cache readiness.)
- */
+/** Create each missing folder in `folderPath`, segment by segment. */
 async function ensureFolder(app: App, folderPath: string): Promise<void> {
   const parts = folderPath.split("/").filter(Boolean);
   let cur = "";
@@ -63,99 +56,64 @@ async function openFile(
   await leaf.openFile(file, { active: true, mode });
 }
 
-/**
- * For a WEEK click, an existing hub may live under the LEGACY range-named folder
- * (e.g. `Week_Apr27-May03_2026`) rather than the new ISO name. Probe the
- * range-named variant at the same START-month location so we OPEN it instead of
- * creating a duplicate ISO folder (honors C4). Returns the legacy file or null.
- */
-function findLegacyWeekNote(
-  app: App,
-  date: Moment,
-  settings: ISettings
-): TFile | null {
-  const start = startOfIsoWeek(date);
-  const y = start.format("YYYY");
-  const monthStamp = start.format("MMM_YYYY");
-  const range = weekRange(start);
-  const legacyPath = `${settings.hubRoot}/Year_${y}/Month_${monthStamp}/Week_${range}/_HUB_Week_${range}.md`;
-  const f = app.vault.getAbstractFileByPath(legacyPath);
+/** The existing note for this plan, if any (canonical path only). */
+function findExisting(app: App, destPath: string): TFile | null {
+  const f = app.vault.getAbstractFileByPath(`${destPath}.md`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return f && (f as any).extension === "md" ? (f as TFile) : null;
 }
 
 /**
- * Locate an already-existing HUB note for a clicked period, if any.
- * Checks the canonical ISO/START-month path first, then (week only) the legacy
- * range-named path.
- */
-function findExistingNote(
-  app: App,
-  period: PeriodKind,
-  date: Moment,
-  paths: PeriodPaths,
-  settings: ISettings
-): TFile | null {
-  const canonical = app.vault.getAbstractFileByPath(`${paths.destPath}.md`);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (canonical && (canonical as any).extension === "md") {
-    return canonical as TFile;
-  }
-  if (period === "week") {
-    return findLegacyWeekNote(app, date, settings);
-  }
-  return null;
-}
-
-/**
- * Create the note from its STATIC seed template, then open it. The static
- * template supplies the body verbatim (no computation in it); the only dynamic
- * bits — the note's `name` and its parent `related_notes` link — are filled in
- * here via the frontmatter API. Shared by the HUB and Overview create paths so
- * the create/seed/open sequence exists in exactly one place.
+ * Create the note from the plan and open it. Never throws to the caller: a
+ * missing template or any I/O error shows a Notice (fixes the silent-fail).
  */
 async function buildAndOpen(
   app: App,
-  paths: PeriodPaths,
+  plan: NotePlan,
   templatePath: string,
   inNewSplit: boolean,
   cb?: (file: TFile) => void
 ): Promise<void> {
-  const templateFile = app.vault.getAbstractFileByPath(templatePath);
-  if (!templateFile) {
-    throw new Error(
-      `[Calendar] Static template not found: "${templatePath}". Set the ` +
-        `correct path in the Calendar plugin settings.`
-    );
+  try {
+    let content = "";
+    if (templatePath) {
+      const templateFile = app.vault.getAbstractFileByPath(templatePath);
+      if (!templateFile) {
+        new Notice(
+          `Calendar: seed template not found — "${templatePath}". ` +
+            `Fix the path (or turn off templates) in Calendar settings.`
+        );
+        return;
+      }
+      const seed = await app.vault.read(templateFile as TFile);
+      content = applyFields(seed, plan.fields);
+    }
+
+    if (plan.folderPath) {
+      await ensureFolder(app, plan.folderPath);
+    }
+    const created = await app.vault.create(`${plan.destPath}.md`, content);
+    await openFile(app, created, inNewSplit);
+    cb?.(created);
+  } catch (err) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msg = (err as any)?.message ?? String(err);
+    new Notice(`Calendar: couldn't create "${plan.fileName}" — ${msg}`);
+    console.error("[Calendar] create failed", err);
   }
-  const seed = await app.vault.read(templateFile as TFile);
-  // Fill the only dynamic bits (name + parent link) and write the whole note in
-  // one pass. For weeks `name` keeps the human range (paths.nameField); the file
-  // itself uses the ISO name.
-  const content = fillSeedIdentity(seed, paths.nameField, paths.parentLink);
-
-  await ensureFolder(app, paths.folderPath);
-  const created = await app.vault.create(`${paths.destPath}.md`, content);
-
-  await openFile(app, created, inNewSplit);
-  cb?.(created);
 }
 
-/**
- * Open the existing note if found, else (optionally behind the confirm modal)
- * create it from its static seed and open it. The one place the click behavior
- * (create-if-missing-else-open; never throw, never duplicate) lives.
- */
+/** Shared open-or-create flow (with the optional confirm modal). */
 async function openOrCreate(
   app: App,
   settings: ISettings,
-  existing: TFile | null,
-  paths: PeriodPaths,
+  plan: NotePlan,
   templatePath: string,
   modalTitle: string,
   inNewSplit: boolean,
   cb?: (file: TFile) => void
 ): Promise<void> {
+  const existing = findExisting(app, plan.destPath);
   if (existing) {
     await openFile(app, existing, inNewSplit);
     cb?.(existing);
@@ -163,24 +121,28 @@ async function openOrCreate(
   }
 
   const doCreate = () =>
-    buildAndOpen(app, paths, templatePath, inNewSplit, cb);
+    buildAndOpen(app, plan, templatePath, inNewSplit, cb);
 
   if (settings.shouldConfirmBeforeCreate) {
     createConfirmationDialog({
       cta: "Create",
       onAccept: doCreate,
       title: modalTitle,
-      text: `"${paths.fileName}" does not exist yet. Create it at ${paths.folderPath}?`,
+      text: `Create "${plan.fileName}"${
+        plan.folderPath ? ` in ${plan.folderPath}` : ""
+      }?`,
     });
   } else {
     await doCreate();
   }
 }
 
-/**
- * THE click behavior: create-or-open the period's HUB note (day/week/month/year).
- * Never throws on an existing file; never creates a time-suffixed duplicate.
- */
+/** Resolve the template path for a period (empty when templating is off). */
+function hubTemplate(period: PeriodKind, settings: ISettings): string {
+  return settings.useTemplates ? settings.hubTemplates[period] : "";
+}
+
+/** THE click behaviour: create-or-open the period's HUB note. */
 export async function createOrOpenHub(
   app: App,
   settings: ISettings,
@@ -189,24 +151,19 @@ export async function createOrOpenHub(
   inNewSplit: boolean,
   cb?: (file: TFile) => void
 ): Promise<void> {
-  const paths = pathsFor(period, date, pathConfig(settings));
-  const existing = findExistingNote(app, period, date, paths, settings);
+  const plan = planFor(period, date, settings);
   await openOrCreate(
     app,
     settings,
-    existing,
-    paths,
-    templatePathFor(period, settings),
+    plan,
+    hubTemplate(period, settings),
     `New ${PERIOD_LABEL[period]}`,
     inNewSplit,
     cb
   );
 }
 
-/**
- * Create-or-open the day Overview note (right-click only). Lives beside the Day
- * HUB; never created by a left-click.
- */
+/** Create-or-open the day Overview note (right-click only). */
 export async function createOrOpenOverview(
   app: App,
   settings: ISettings,
@@ -214,42 +171,26 @@ export async function createOrOpenOverview(
   inNewSplit: boolean,
   cb?: (file: TFile) => void
 ): Promise<void> {
-  const paths = overviewPaths(date, pathConfig(settings));
-  const existingAf = app.vault.getAbstractFileByPath(`${paths.destPath}.md`);
-  const existing =
-    existingAf &&
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (existingAf as any).extension === "md"
-      ? (existingAf as TFile)
-      : null;
+  const plan = overviewPlan(date, settings);
+  const templatePath = settings.useTemplates ? settings.hubTemplates.overview : "";
   await openOrCreate(
     app,
     settings,
-    existing,
-    paths,
-    settings.overviewTemplate,
+    plan,
+    templatePath,
     "New Day Overview",
     inNewSplit,
     cb
   );
 }
 
-/**
- * Does a HUB note exist for this period/date? Used by the visual-cue source
- * (binary "hub exists" highlight). Synchronous metadata lookup — no disk read.
- */
+/** Does a HUB note exist for this period/date? (binary visual cue.) */
 export function hubExists(
   app: App,
   settings: ISettings,
   period: PeriodKind,
   date: Moment
 ): boolean {
-  const paths = pathsFor(period, date, pathConfig(settings));
-  if (app.vault.getAbstractFileByPath(`${paths.destPath}.md`)) {
-    return true;
-  }
-  if (period === "week" && findLegacyWeekNote(app, date, settings)) {
-    return true;
-  }
-  return false;
+  const plan = planFor(period, date, settings);
+  return !!findExisting(app, plan.destPath);
 }

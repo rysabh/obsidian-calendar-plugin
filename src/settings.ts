@@ -1,56 +1,26 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
+
+import { parseFields, serializeFields } from "src/core/fields";
+import { DEFAULTS } from "src/defaults";
+import type {
+  DateFormats,
+  HubTemplates,
+  ISettings,
+  PeriodKind,
+} from "src/types";
 import type { ILocaleOverride, IWeekStartOption } from "src/vendor/calendar-ui";
 
 import type CalendarPlugin from "./main";
 
-/** Per-period STATIC seed-template paths. */
-export interface IHubTemplates {
-  day: string;
-  week: string;
-  month: string;
-  year: string;
+// Re-export the canonical schema + defaults so existing imports keep working.
+export type { ISettings } from "src/types";
+export const defaultSettings = DEFAULTS;
+
+export function appHasPeriodicNotesPluginLoaded(): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const periodicNotes = (<any>window.app).plugins.getPlugin("periodic-notes");
+  return periodicNotes && periodicNotes.settings?.weekly?.enabled;
 }
-
-export interface ISettings {
-  weekStart: IWeekStartOption;
-  shouldConfirmBeforeCreate: boolean;
-
-  // ---- Time-hierarchy HUB feature (this fork) ----------------------------
-  // ALL of this feature's config lives here, in the calendar plugin's own
-  // settings (data.json) — the single source of truth, self-contained so the
-  // plugin works in any vault. It is fully independent of the Templater
-  // templates: for new-note seed content it reads the STATIC templates below;
-  // it computes paths itself (src/core/periods.ts). Nothing is shared with, or
-  // depends on, Templater.
-  /** Output root for the generated hierarchy. */
-  hubRoot: string;
-  /** STATIC seed template per period (plain content; the plugin fills name + parent). */
-  hubTemplates: IHubTemplates;
-  /** STATIC seed template for the day Overview note (right-click only). */
-  overviewTemplate: string;
-  /** Highlight a day/week cell when its HUB note exists (binary cue). */
-  showHubCues: boolean;
-
-  /** Show the week-number column (which makes weeks clickable). */
-  showWeeklyNote: boolean;
-
-  localeOverride: ILocaleOverride;
-}
-
-// Default STATIC seed templates (this vault). All overridable in settings so
-// the plugin works in any vault — these are just sensible starting values.
-const STATIC_DIR = "4_Archives/z___TEMPLATES/Obsidian_Templates/Static";
-
-export const DEFAULT_HUB_ROOT = "4_Archives/ARCHIVED_Projects";
-
-export const DEFAULT_HUB_TEMPLATES: IHubTemplates = {
-  day: `${STATIC_DIR}/ST_HUB_Day.md`,
-  week: `${STATIC_DIR}/ST_HUB_Week.md`,
-  month: `${STATIC_DIR}/ST_HUB_Month.md`,
-  year: `${STATIC_DIR}/ST_HUB_Year.md`,
-};
-
-export const DEFAULT_OVERVIEW_TEMPLATE = `${STATIC_DIR}/ST_Overview_Day.md`;
 
 const weekdays = [
   "sunday",
@@ -62,27 +32,7 @@ const weekdays = [
   "saturday",
 ];
 
-export const defaultSettings = Object.freeze({
-  shouldConfirmBeforeCreate: true,
-  // Monday — the hub hierarchy is ISO/Monday based; keep the grid consistent.
-  weekStart: "monday" as IWeekStartOption,
-
-  hubRoot: DEFAULT_HUB_ROOT,
-  hubTemplates: DEFAULT_HUB_TEMPLATES,
-  overviewTemplate: DEFAULT_OVERVIEW_TEMPLATE,
-  showHubCues: true,
-
-  // Show the week-number column so weeks are clickable out of the box.
-  showWeeklyNote: true,
-
-  localeOverride: "system-default",
-});
-
-export function appHasPeriodicNotesPluginLoaded(): boolean {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const periodicNotes = (<any>window.app).plugins.getPlugin("periodic-notes");
-  return periodicNotes && periodicNotes.settings?.weekly?.enabled;
-}
+const PERIODS: PeriodKind[] = ["day", "week", "month", "year"];
 
 export class CalendarSettingsTab extends PluginSettingTab {
   private plugin: CalendarPlugin;
@@ -92,38 +42,252 @@ export class CalendarSettingsTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  private get opts(): ISettings {
+    return this.plugin.options;
+  }
+
   display(): void {
     this.containerEl.empty();
 
-    // --- Calendar display ---
+    // --- Calendar grid ---
     this.containerEl.createEl("h3", { text: "Calendar" });
     this.addWeekStartSetting();
     this.addShowWeeklyNoteSetting();
     this.addLocaleOverrideSetting();
 
-    // --- The HUB feature (all config self-contained here) ---
-    this.containerEl.createEl("h3", { text: "Time Hierarchy (HUB notes)" });
+    // --- Time hierarchy: output & behaviour ---
+    this.containerEl.createEl("h3", { text: "Time hierarchy — output" });
     this.containerEl.createEl("p", {
       cls: "setting-item-description",
       text:
         "Left-click a day or week number, or the month/year in the header, to " +
-        "create (or open) the matching _HUB_ note under the output root. New " +
-        "notes are seeded from the static templates below; the plugin fills in " +
-        "the note name and parent link. (Independent of Templater.)",
+        "create (or open) the matching note. Names and folders are computed from " +
+        "the settings below — see the worked example in the docs.",
     });
-    this.addHubRootSetting();
-    this.addHubTemplateSetting("day", "Day HUB seed template");
-    this.addHubTemplateSetting("week", "Week HUB seed template");
-    this.addHubTemplateSetting("month", "Month HUB seed template");
-    this.addHubTemplateSetting("year", "Year HUB seed template");
-    this.addOverviewTemplateSetting();
-    this.addConfirmCreateSetting();
-    this.addShowHubCuesSetting();
+    this.addText(
+      "Output root folder",
+      "Top folder for all notes. Blank = vault root.",
+      () => this.opts.hubRoot,
+      (v) => ({ hubRoot: v }),
+      DEFAULTS.hubRoot,
+      true // allow empty -> vault root
+    );
+    this.addToggle(
+      "Create folder hierarchy",
+      "On: nest notes in Year/Month/Week/Day folders. Off: put every note " +
+        "directly in the output root.",
+      () => this.opts.createHierarchy,
+      (v) => ({ createHierarchy: v })
+    );
+    this.addToggle(
+      "Confirm before creating a note",
+      "Show a confirmation before creating a new note.",
+      () => this.opts.shouldConfirmBeforeCreate,
+      (v) => ({ shouldConfirmBeforeCreate: v })
+    );
+    this.addToggle(
+      "Highlight days/weeks with a note",
+      "Mark a calendar cell when its note already exists.",
+      () => this.opts.showHubCues,
+      (v) => ({ showHubCues: v })
+    );
+
+    // --- Naming basics ---
+    this.containerEl.createEl("h3", { text: "Time hierarchy — naming" });
+    this.addText(
+      "Name prefix",
+      'Exact text in front of every name. Blank gives e.g. "Day_Jun04_2026".',
+      () => this.opts.prefix,
+      (v) => ({ prefix: v }),
+      DEFAULTS.prefix,
+      true // allow empty
+    );
+    this.addFormat("Day date format", "day", "Jun04_2026");
+    this.addFormat("Month date format", "month", "Jun_2026");
+    this.addFormat("Year date format", "year", "2026");
+    this.addToggle(
+      "Use ISO week numbers",
+      "On: ISO weeks (Monday, 01–53). Off: locale week numbers.",
+      () => this.opts.useIsoWeeks,
+      (v) => ({ useIsoWeeks: v })
+    );
+    this.addFormat("Week id format", "weekId", "23_2026");
+
+    // --- Templates (optional) ---
+    this.containerEl.createEl("h3", { text: "Templates (optional)" });
+    this.containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text:
+        "Off: new notes are created empty (just the computed name). On: each new " +
+        "note is seeded from the template file for its period; the computed " +
+        "fields below are then filled in.",
+    });
+    this.addToggle(
+      "Use templates",
+      "Seed new notes from a template file.",
+      () => this.opts.useTemplates,
+      (v) => ({ useTemplates: v })
+    );
+    this.addTemplatePath("Day template", "day");
+    this.addTemplatePath("Week template", "week");
+    this.addTemplatePath("Month template", "month");
+    this.addTemplatePath("Year template", "year");
+    this.addTemplatePath("Day Overview template", "overview");
+
+    // --- Advanced (collapsible) ---
+    const adv = this.containerEl.createEl("details");
+    adv.createEl("summary", {
+      text: "Advanced — naming patterns & computed fields",
+    });
+    adv.createEl("p", {
+      cls: "setting-item-description",
+      text:
+        "Tokens: {prefix} {Kind} {year} {month} {day} {weekId} {weekRange} and " +
+        "{date:FORMAT}. Folder patterns are used only when the hierarchy is on.",
+    });
+    PERIODS.forEach((p) => {
+      this.addPattern(adv, `${cap(p)} folder pattern`, "folderPatterns", p);
+      this.addPattern(adv, `${cap(p)} file pattern`, "filePatterns", p);
+      this.addComputedFields(adv, p);
+    });
+
+    // --- Reset ---
+    new Setting(this.containerEl).addButton((b) =>
+      b
+        .setButtonText("Reset all settings to defaults")
+        .setWarning()
+        .onClick(async () => {
+          await this.plugin.writeOptions(() => ({ ...DEFAULTS }));
+          this.display();
+        })
+    );
   }
+
+  // ---- generic field helpers ------------------------------------------------
+
+  private addText(
+    name: string,
+    desc: string,
+    get: () => string,
+    set: (v: string) => Partial<ISettings>,
+    placeholder = "",
+    allowEmpty = false
+  ): void {
+    new Setting(this.containerEl)
+      .setName(name)
+      .setDesc(desc)
+      .addText((t) => {
+        t.setPlaceholder(placeholder);
+        t.setValue(get());
+        t.onChange((v) => {
+          this.plugin.writeOptions(() =>
+            set(allowEmpty ? v : v || placeholder)
+          );
+        });
+      });
+  }
+
+  private addToggle(
+    name: string,
+    desc: string,
+    get: () => boolean,
+    set: (v: boolean) => Partial<ISettings>
+  ): void {
+    new Setting(this.containerEl)
+      .setName(name)
+      .setDesc(desc)
+      .addToggle((toggle) => {
+        toggle.setValue(get());
+        toggle.onChange((v) => this.plugin.writeOptions(() => set(v)));
+      });
+  }
+
+  private addFormat(name: string, key: keyof DateFormats, example: string): void {
+    new Setting(this.containerEl)
+      .setName(name)
+      .setDesc(`moment.js format. Default "${DEFAULTS.formats[key]}" → ${example}.`)
+      .addText((t) => {
+        t.setPlaceholder(DEFAULTS.formats[key]);
+        t.setValue(this.opts.formats[key]);
+        t.onChange((v) => {
+          this.plugin.writeOptions((old) => ({
+            formats: { ...old.formats, [key]: v || DEFAULTS.formats[key] },
+          }));
+        });
+      });
+  }
+
+  private addTemplatePath(name: string, key: keyof HubTemplates): void {
+    const setting = new Setting(this.containerEl).setName(name);
+    const status = setting.descEl.createSpan();
+    const refresh = (value: string): void => {
+      if (!value) {
+        status.setText("No template set.");
+        status.style.color = "";
+        return;
+      }
+      const exists = !!this.app.vault.getAbstractFileByPath(value);
+      status.setText(exists ? "✓ found" : "✗ not found");
+      status.style.color = exists
+        ? "var(--text-success)"
+        : "var(--text-error)";
+    };
+    setting.addText((t) => {
+      t.setPlaceholder("path/to/Template.md");
+      t.setValue(this.opts.hubTemplates[key]);
+      refresh(this.opts.hubTemplates[key]);
+      t.onChange((v) => {
+        this.plugin.writeOptions((old) => ({
+          hubTemplates: { ...old.hubTemplates, [key]: v },
+        }));
+        refresh(v);
+      });
+    });
+  }
+
+  // ---- advanced helpers -----------------------------------------------------
+
+  private addPattern(
+    container: HTMLElement,
+    name: string,
+    bucket: "folderPatterns" | "filePatterns",
+    period: PeriodKind
+  ): void {
+    new Setting(container).setName(name).addText((t) => {
+      t.setPlaceholder(DEFAULTS[bucket][period]);
+      t.setValue(this.opts[bucket][period]);
+      t.onChange((v) => {
+        this.plugin.writeOptions((old) => ({
+          [bucket]: { ...old[bucket], [period]: v || DEFAULTS[bucket][period] },
+        }));
+      });
+    });
+  }
+
+  private addComputedFields(
+    container: HTMLElement,
+    period: PeriodKind
+  ): void {
+    new Setting(container)
+      .setName(`${cap(period)} computed fields`)
+      .setDesc('One per line: "field = formula" (use "field[] =" for list fields).')
+      .addTextArea((t) => {
+        t.setValue(serializeFields(this.opts.computedFields[period]));
+        t.onChange((v) => {
+          this.plugin.writeOptions((old) => ({
+            computedFields: {
+              ...old.computedFields,
+              [period]: parseFields(v),
+            },
+          }));
+        });
+      });
+  }
+
+  // ---- calendar-grid settings (unchanged) -----------------------------------
 
   addWeekStartSetting(): void {
     const { moment } = window;
-
     const localizedWeekdays = moment.weekdays();
     const localeWeekStartNum = window._bundledLocaleWeekSpec.dow;
     const localeWeekStart = moment.weekdays()[localeWeekStartNum];
@@ -131,16 +295,16 @@ export class CalendarSettingsTab extends PluginSettingTab {
     new Setting(this.containerEl)
       .setName("Start week on")
       .setDesc(
-        "Day the calendar grid starts on. Hub weeks always use ISO (Monday) " +
-          "week numbers regardless of this."
+        "Which day the calendar grid starts on. (Hub weeks use ISO/Monday " +
+          "unless you turn ISO weeks off below.)"
       )
       .addDropdown((dropdown) => {
         dropdown.addOption("locale", `Locale default (${localeWeekStart})`);
         localizedWeekdays.forEach((day, i) => {
           dropdown.addOption(weekdays[i], day);
         });
-        dropdown.setValue(this.plugin.options.weekStart);
-        dropdown.onChange(async (value) => {
+        dropdown.setValue(this.opts.weekStart);
+        dropdown.onChange((value) => {
           this.plugin.writeOptions(() => ({
             weekStart: value as IWeekStartOption,
           }));
@@ -153,8 +317,8 @@ export class CalendarSettingsTab extends PluginSettingTab {
       .setName("Show week number")
       .setDesc("Add a column with the (clickable) week number.")
       .addToggle((toggle) => {
-        toggle.setValue(this.plugin.options.showWeeklyNote);
-        toggle.onChange(async (value) => {
+        toggle.setValue(this.opts.showWeeklyNote);
+        toggle.onChange((value) => {
           this.plugin.writeOptions(() => ({ showWeeklyNote: value }));
         });
       });
@@ -172,86 +336,16 @@ export class CalendarSettingsTab extends PluginSettingTab {
         moment.locales().forEach((locale) => {
           dropdown.addOption(locale, locale);
         });
-        dropdown.setValue(this.plugin.options.localeOverride);
-        dropdown.onChange(async (value) => {
+        dropdown.setValue(this.opts.localeOverride);
+        dropdown.onChange((value) => {
           this.plugin.writeOptions(() => ({
             localeOverride: value as ILocaleOverride,
           }));
         });
       });
   }
+}
 
-  addHubRootSetting(): void {
-    new Setting(this.containerEl)
-      .setName("Output root folder")
-      .setDesc("Where the Year/Month/Week/Day hierarchy is created.")
-      .addText((textfield) => {
-        textfield.setPlaceholder(DEFAULT_HUB_ROOT);
-        textfield.setValue(this.plugin.options.hubRoot);
-        textfield.onChange(async (value) => {
-          this.plugin.writeOptions(() => ({
-            hubRoot: value || DEFAULT_HUB_ROOT,
-          }));
-        });
-      });
-  }
-
-  addHubTemplateSetting(period: keyof IHubTemplates, name: string): void {
-    new Setting(this.containerEl)
-      .setName(name)
-      .setDesc(`Static seed note for new ${period} HUB notes.`)
-      .addText((textfield) => {
-        textfield.setPlaceholder(DEFAULT_HUB_TEMPLATES[period]);
-        textfield.setValue(this.plugin.options.hubTemplates[period]);
-        textfield.onChange(async (value) => {
-          this.plugin.writeOptions((old) => ({
-            hubTemplates: {
-              ...old.hubTemplates,
-              [period]: value || DEFAULT_HUB_TEMPLATES[period],
-            },
-          }));
-        });
-      });
-  }
-
-  addOverviewTemplateSetting(): void {
-    new Setting(this.containerEl)
-      .setName("Day Overview seed template")
-      .setDesc("Static seed for the day Overview note (right-click menu).")
-      .addText((textfield) => {
-        textfield.setPlaceholder(DEFAULT_OVERVIEW_TEMPLATE);
-        textfield.setValue(this.plugin.options.overviewTemplate);
-        textfield.onChange(async (value) => {
-          this.plugin.writeOptions(() => ({
-            overviewTemplate: value || DEFAULT_OVERVIEW_TEMPLATE,
-          }));
-        });
-      });
-  }
-
-  addConfirmCreateSetting(): void {
-    new Setting(this.containerEl)
-      .setName("Confirm before creating a note")
-      .setDesc("Show a confirmation modal before creating a new HUB note.")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.options.shouldConfirmBeforeCreate);
-        toggle.onChange(async (value) => {
-          this.plugin.writeOptions(() => ({
-            shouldConfirmBeforeCreate: value,
-          }));
-        });
-      });
-  }
-
-  addShowHubCuesSetting(): void {
-    new Setting(this.containerEl)
-      .setName("Highlight days/weeks with a HUB note")
-      .setDesc("Mark a calendar cell when its HUB note already exists.")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.options.showHubCues);
-        toggle.onChange(async (value) => {
-          this.plugin.writeOptions(() => ({ showHubCues: value }));
-        });
-      });
-  }
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
