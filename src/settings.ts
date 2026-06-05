@@ -48,6 +48,7 @@ export class CalendarSettingsTab extends PluginSettingTab {
 
   display(): void {
     this.containerEl.empty();
+    this.containerEl.addClass("calendar-settings");
 
     // --- Calendar grid ---
     this.containerEl.createEl("h3", { text: "Calendar" });

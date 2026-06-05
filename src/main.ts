@@ -3,6 +3,7 @@ import { App, Plugin, WorkspaceLeaf } from "obsidian";
 
 import { VIEW_TYPE_CALENDAR } from "./constants";
 import { mergeSettings } from "./core/mergeOptions";
+import { PLUGIN_STYLES } from "./styles";
 import { settings } from "./ui/stores";
 import {
   appHasPeriodicNotesPluginLoaded,
@@ -30,6 +31,8 @@ export default class CalendarPlugin extends Plugin {
   }
 
   async onload(): Promise<void> {
+    this.injectStyles();
+
     this.register(
       settings.subscribe((value) => {
         this.options = value;
@@ -82,6 +85,15 @@ export default class CalendarPlugin extends Plugin {
         this.app.workspace.on("layout-ready", this.initLeaf.bind(this))
       );
     }
+  }
+
+  /** Inject the small UI stylesheet (modal width + settings sizing); auto-removed. */
+  injectStyles(): void {
+    const styleEl = document.createElement("style");
+    styleEl.id = "calendar-hub-styles";
+    styleEl.textContent = PLUGIN_STYLES;
+    document.head.appendChild(styleEl);
+    this.register(() => styleEl.remove());
   }
 
   initLeaf(): void {

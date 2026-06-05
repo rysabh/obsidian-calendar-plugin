@@ -14,6 +14,9 @@ export class ConfirmationModal extends Modal {
 
     const { cta, onAccept, text, title } = config;
 
+    // Widen the modal so long paths wrap instead of being cut off (see styles.ts).
+    this.modalEl.addClass("calendar-modal");
+
     this.contentEl.createEl("h2", { text: title });
     this.contentEl.createEl("p", { text });
 
