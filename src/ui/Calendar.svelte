@@ -6,7 +6,7 @@
     Calendar as CalendarBase,
     ICalendarSource,
     configureGlobalMomentLocale,
-  } from "obsidian-calendar-ui";
+  } from "src/vendor/calendar-ui";
   import { onDestroy } from "svelte";
 
   import type { ISettings } from "src/settings";
@@ -22,6 +22,8 @@
   export let onHoverWeek: (date: Moment, targetEl: EventTarget) => boolean;
   export let onClickDay: (date: Moment, isMetaPressed: boolean) => boolean;
   export let onClickWeek: (date: Moment, isMetaPressed: boolean) => boolean;
+  export let onClickMonth: (date: Moment) => void = null;
+  export let onClickYear: (date: Moment) => void = null;
   export let onContextMenuDay: (date: Moment, event: MouseEvent) => boolean;
   export let onContextMenuWeek: (date: Moment, event: MouseEvent) => boolean;
 
@@ -62,6 +64,8 @@
   {onContextMenuWeek}
   {onClickDay}
   {onClickWeek}
+  {onClickMonth}
+  {onClickYear}
   bind:displayedMonth
   localeData={today.localeData()}
   selectedId={$activeFile}

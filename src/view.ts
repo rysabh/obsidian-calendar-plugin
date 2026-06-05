@@ -1,28 +1,19 @@
 import type { Moment } from "moment";
 import {
-  getDailyNote,
-  getDailyNoteSettings,
   getDateFromFile,
-  getWeeklyNote,
   getWeeklyNoteSettings,
 } from "obsidian-daily-notes-interface";
 import { FileView, TFile, ItemView, WorkspaceLeaf } from "obsidian";
-import { get } from "svelte/store";
 
 import { TRIGGER_ON_OPEN, VIEW_TYPE_CALENDAR } from "src/constants";
-import { tryToCreateDailyNote } from "src/io/dailyNotes";
-import { tryToCreateWeeklyNote } from "src/io/weeklyNotes";
+import { createOrOpenHub } from "src/core/noteService";
+import { dayPaths, weekPaths, PeriodKind } from "src/core/periods";
 import type { ISettings } from "src/settings";
 
 import Calendar from "./ui/Calendar.svelte";
-import { showFileMenu } from "./ui/fileMenu";
-import { activeFile, dailyNotes, weeklyNotes, settings } from "./ui/stores";
-import {
-  customTagsSource,
-  streakSource,
-  tasksSource,
-  wordCountSource,
-} from "./ui/sources";
+import { showCellMenu } from "./ui/contextMenu";
+import { activeFile, settings } from "./ui/stores";
+import { hubExistsSource } from "./ui/sources/hubExists";
 
 export default class CalendarView extends ItemView {
   private calendar: Calendar;
@@ -33,8 +24,9 @@ export default class CalendarView extends ItemView {
 
     this.openOrCreateDailyNote = this.openOrCreateDailyNote.bind(this);
     this.openOrCreateWeeklyNote = this.openOrCreateWeeklyNote.bind(this);
+    this.openOrCreateMonthNote = this.openOrCreateMonthNote.bind(this);
+    this.openOrCreateYearNote = this.openOrCreateYearNote.bind(this);
 
-    this.onNoteSettingsUpdate = this.onNoteSettingsUpdate.bind(this);
     this.onFileCreated = this.onFileCreated.bind(this);
     this.onFileDeleted = this.onFileDeleted.bind(this);
     this.onFileModified = this.onFileModified.bind(this);
@@ -46,23 +38,15 @@ export default class CalendarView extends ItemView {
     this.onContextMenuDay = this.onContextMenuDay.bind(this);
     this.onContextMenuWeek = this.onContextMenuWeek.bind(this);
 
-    this.registerEvent(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (<any>this.app.workspace).on(
-        "periodic-notes:settings-updated",
-        this.onNoteSettingsUpdate
-      )
-    );
     this.registerEvent(this.app.vault.on("create", this.onFileCreated));
     this.registerEvent(this.app.vault.on("delete", this.onFileDeleted));
     this.registerEvent(this.app.vault.on("modify", this.onFileModified));
     this.registerEvent(this.app.workspace.on("file-open", this.onFileOpen));
 
     this.settings = null;
+    // All config lives in the calendar's own settings; re-render on change.
     settings.subscribe((val) => {
       this.settings = val;
-
-      // Refresh the calendar if settings change
       if (this.calendar) {
         this.calendar.tick();
       }
@@ -89,14 +73,9 @@ export default class CalendarView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    // Integration point: external plugins can listen for `calendar:open`
-    // to feed in additional sources.
-    const sources = [
-      customTagsSource,
-      streakSource,
-      wordCountSource,
-      tasksSource,
-    ];
+    // Cues come from a single source: does the period's HUB note exist?
+    // (binary highlight — replaces the upstream word-count dots, R5/Q14).
+    const sources = [hubExistsSource];
     this.app.workspace.trigger(TRIGGER_ON_OPEN, sources);
 
     this.calendar = new Calendar({
@@ -105,6 +84,8 @@ export default class CalendarView extends ItemView {
       props: {
         onClickDay: this.openOrCreateDailyNote,
         onClickWeek: this.openOrCreateWeeklyNote,
+        onClickMonth: this.openOrCreateMonthNote,
+        onClickYear: this.openOrCreateYearNote,
         onHoverDay: this.onHoverDay,
         onHoverWeek: this.onHoverWeek,
         onContextMenuDay: this.onContextMenuDay,
@@ -114,7 +95,10 @@ export default class CalendarView extends ItemView {
     });
   }
 
-  onHoverDay(
+  // --- Hover previews (target the HUB note path) --------------------------
+
+  private hoverHub(
+    period: PeriodKind,
     date: Moment,
     targetEl: EventTarget,
     isMetaPressed: boolean
@@ -122,15 +106,21 @@ export default class CalendarView extends ItemView {
     if (!isMetaPressed) {
       return;
     }
-    const { format } = getDailyNoteSettings();
-    const note = getDailyNote(date, get(dailyNotes));
+    const paths =
+      period === "day"
+        ? dayPaths(date, { root: this.settings.hubRoot })
+        : weekPaths(date, { root: this.settings.hubRoot });
     this.app.workspace.trigger(
       "link-hover",
       this,
       targetEl,
-      date.format(format),
-      note?.path
+      paths.fileName,
+      `${paths.destPath}.md`
     );
+  }
+
+  onHoverDay(date: Moment, targetEl: EventTarget, isMetaPressed: boolean): void {
+    this.hoverHub("day", date, targetEl, isMetaPressed);
   }
 
   onHoverWeek(
@@ -138,78 +128,50 @@ export default class CalendarView extends ItemView {
     targetEl: EventTarget,
     isMetaPressed: boolean
   ): void {
-    if (!isMetaPressed) {
-      return;
-    }
-    const note = getWeeklyNote(date, get(weeklyNotes));
-    const { format } = getWeeklyNoteSettings();
-    this.app.workspace.trigger(
-      "link-hover",
-      this,
-      targetEl,
-      date.format(format),
-      note?.path
+    this.hoverHub("week", date, targetEl, isMetaPressed);
+  }
+
+  // --- Right-click menus (declared in contextMenu.ts registry) ------------
+
+  private onContextMenuDay(date: Moment, event: MouseEvent): void {
+    showCellMenu(
+      { app: this.app, settings: this.settings, kind: "day", date },
+      { x: event.pageX, y: event.pageY }
     );
   }
 
-  private onContextMenuDay(date: Moment, event: MouseEvent): void {
-    const note = getDailyNote(date, get(dailyNotes));
-    if (!note) {
-      // If no file exists for a given day, show nothing.
-      return;
-    }
-    showFileMenu(this.app, note, {
-      x: event.pageX,
-      y: event.pageY,
-    });
-  }
-
   private onContextMenuWeek(date: Moment, event: MouseEvent): void {
-    const note = getWeeklyNote(date, get(weeklyNotes));
-    if (!note) {
-      // If no file exists for a given day, show nothing.
-      return;
-    }
-    showFileMenu(this.app, note, {
-      x: event.pageX,
-      y: event.pageY,
-    });
+    showCellMenu(
+      { app: this.app, settings: this.settings, kind: "week", date },
+      { x: event.pageX, y: event.pageY }
+    );
   }
 
-  private onNoteSettingsUpdate(): void {
-    dailyNotes.reindex();
-    weeklyNotes.reindex();
-    this.updateActiveFile();
+  // --- Keep cues fresh when hub files appear/disappear/change -------------
+
+  private affectsHierarchy(file: TFile): boolean {
+    return !!this.settings && file.path.startsWith(`${this.settings.hubRoot}/`);
   }
 
-  private async onFileDeleted(file: TFile): Promise<void> {
-    if (getDateFromFile(file, "day")) {
-      dailyNotes.reindex();
-      this.updateActiveFile();
-    }
-    if (getDateFromFile(file, "week")) {
-      weeklyNotes.reindex();
-      this.updateActiveFile();
-    }
-  }
-
-  private async onFileModified(file: TFile): Promise<void> {
-    const date = getDateFromFile(file, "day") || getDateFromFile(file, "week");
-    if (date && this.calendar) {
+  private onFileCreated(file: TFile): void {
+    if (
+      this.app.workspace.layoutReady &&
+      this.calendar &&
+      this.affectsHierarchy(file)
+    ) {
       this.calendar.tick();
     }
   }
 
-  private onFileCreated(file: TFile): void {
-    if (this.app.workspace.layoutReady && this.calendar) {
-      if (getDateFromFile(file, "day")) {
-        dailyNotes.reindex();
-        this.calendar.tick();
-      }
-      if (getDateFromFile(file, "week")) {
-        weeklyNotes.reindex();
-        this.calendar.tick();
-      }
+  private async onFileDeleted(file: TFile): Promise<void> {
+    if (this.calendar && this.affectsHierarchy(file)) {
+      this.calendar.tick();
+    }
+  }
+
+  private async onFileModified(file: TFile): Promise<void> {
+    if (this.calendar && this.affectsHierarchy(file)) {
+      this.calendar.tick();
     }
   }
 
@@ -238,76 +200,59 @@ export default class CalendarView extends ItemView {
     const { activeLeaf } = this.app.workspace;
 
     if (activeLeaf.view instanceof FileView) {
-      // Check to see if the active note is a daily-note
+      // Best-effort: if the active note matches the daily/weekly note format,
+      // jump the calendar to it. Custom _HUB_ names won't match (a known
+      // limitation — see the manual checklist), so this no-ops for them.
       let date = getDateFromFile(activeLeaf.view.file, "day");
       if (date) {
         this.calendar.$set({ displayedMonth: date });
         return;
       }
 
-      // Check to see if the active note is a weekly-note
       const { format } = getWeeklyNoteSettings();
       date = moment(activeLeaf.view.file.basename, format, true);
       if (date.isValid()) {
         this.calendar.$set({ displayedMonth: date });
-        return;
       }
     }
+  }
+
+  // --- Create-or-open seams (all route through the shared core) -----------
+
+  async openOrCreateDailyNote(date: Moment, inNewSplit: boolean): Promise<void> {
+    await createOrOpenHub(
+      this.app,
+      this.settings,
+      "day",
+      date,
+      inNewSplit,
+      (f) => activeFile.setFile(f)
+    );
   }
 
   async openOrCreateWeeklyNote(
     date: Moment,
     inNewSplit: boolean
   ): Promise<void> {
-    const { workspace } = this.app;
-
-    const startOfWeek = date.clone().startOf("week");
-
-    const existingFile = getWeeklyNote(date, get(weeklyNotes));
-
-    if (!existingFile) {
-      // File doesn't exist
-      tryToCreateWeeklyNote(startOfWeek, inNewSplit, this.settings, (file) => {
-        activeFile.setFile(file);
-      });
-      return;
-    }
-
-    const leaf = inNewSplit
-      ? workspace.splitActiveLeaf()
-      : workspace.getUnpinnedLeaf();
-    await leaf.openFile(existingFile);
-
-    activeFile.setFile(existingFile);
-    workspace.setActiveLeaf(leaf, true, true)
+    await createOrOpenHub(
+      this.app,
+      this.settings,
+      "week",
+      date,
+      inNewSplit,
+      (f) => activeFile.setFile(f)
+    );
   }
 
-  async openOrCreateDailyNote(
-    date: Moment,
-    inNewSplit: boolean
-  ): Promise<void> {
-    const { workspace } = this.app;
-    const existingFile = getDailyNote(date, get(dailyNotes));
-    if (!existingFile) {
-      // File doesn't exist
-      tryToCreateDailyNote(
-        date,
-        inNewSplit,
-        this.settings,
-        (dailyNote: TFile) => {
-          activeFile.setFile(dailyNote);
-        }
-      );
-      return;
-    }
+  async openOrCreateMonthNote(date: Moment): Promise<void> {
+    await createOrOpenHub(this.app, this.settings, "month", date, false, (f) =>
+      activeFile.setFile(f)
+    );
+  }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mode = (this.app.vault as any).getConfig("defaultViewMode");
-    const leaf = inNewSplit
-      ? workspace.splitActiveLeaf()
-      : workspace.getUnpinnedLeaf();
-    await leaf.openFile(existingFile, { active : true, mode });
-
-    activeFile.setFile(existingFile);
+  async openOrCreateYearNote(date: Moment): Promise<void> {
+    await createOrOpenHub(this.app, this.settings, "year", date, false, (f) =>
+      activeFile.setFile(f)
+    );
   }
 }
