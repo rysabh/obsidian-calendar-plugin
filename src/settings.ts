@@ -142,8 +142,29 @@ export class CalendarSettingsTab extends PluginSettingTab {
     adv.createEl("p", {
       cls: "setting-item-description",
       text:
-        "Tokens: {prefix} {Kind} {year} {month} {day} {weekId} {weekRange} and " +
-        "{date:FORMAT}. Folder patterns are used only when the hierarchy is on.",
+        "Patterns below are built from these tokens. The date tokens are " +
+        "rendered using the formats in the “Time hierarchy — naming” section " +
+        "above — change those to switch e.g. 2026 vs 26, or Jun vs June:",
+    });
+    const legend = adv.createEl("ul", { cls: "setting-item-description" });
+    const tokens: Array<[string, string]> = [
+      ["{prefix}", 'the “Name prefix” above (e.g. "_HUB_", or blank)'],
+      ["{Kind}", "the period word: Day / Week / Month / Year"],
+      ["{year}", "the year, formatted by “Year date format” (e.g. 2026)"],
+      ["{month}", "the month, formatted by “Month date format” (e.g. Jun_2026)"],
+      ["{day}", "the day, formatted by “Day date format” (e.g. Jun04_2026)"],
+      ["{weekId}", "the week, formatted by “Week id format” (e.g. 23_2026)"],
+      ["{weekRange}", "the week’s date range (e.g. Jun01-07_2026)"],
+      ["{date:FORMAT}", "any moment.js format, e.g. {date:dddd} → Thursday"],
+    ];
+    tokens.forEach(([token, meaning]) => {
+      const li = legend.createEl("li");
+      li.createEl("code", { text: token });
+      li.appendText(` — ${meaning}`);
+    });
+    adv.createEl("p", {
+      cls: "setting-item-description",
+      text: "Folder patterns are used only when “Create folder hierarchy” is on.",
     });
     PERIODS.forEach((p) => {
       this.addPattern(adv, `${cap(p)} folder pattern`, "folderPatterns", p);

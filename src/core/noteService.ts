@@ -21,11 +21,13 @@ import { createConfirmationDialog } from "src/ui/modal";
 import { applyFields } from "./fields";
 import { NotePlan, overviewPlan, planFor } from "./plan";
 
+// Generic, prefix-agnostic labels for the confirm dialog ("New Day note", …).
+// (The note's actual name comes from the user's own patterns, shown in the body.)
 const PERIOD_LABEL: Record<PeriodKind, string> = {
-  day: "Day HUB",
-  week: "Week HUB",
-  month: "Month HUB",
-  year: "Year HUB",
+  day: "Day note",
+  week: "Week note",
+  month: "Month note",
+  year: "Year note",
 };
 
 /** Create each missing folder in `folderPath`, segment by segment. */
