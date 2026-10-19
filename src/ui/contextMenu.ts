@@ -45,40 +45,40 @@ function revealHub(ctx: MenuContext, period: PeriodKind): void {
  */
 const MENU_ITEMS: MenuItemDef[] = [
   {
-    title: "Create / open day overview",
+    title: "Open Docket Note",
     icon: "documents",
     isVisible: (c) => c.kind === "day",
     handler: (c) => createOrOpenOverview(c.app, c.settings, c.date, false),
   },
   {
-    title: "Open day note",
+    title: "Open Day Note",
     icon: "calendar-with-checkmark",
     isVisible: (c) => c.kind === "day",
     handler: (c) => createOrOpenHub(c.app, c.settings, "day", c.date, false),
   },
   {
-    title: "Open week note",
+    title: "Open Week Note",
     icon: "calendar-with-checkmark",
     handler: (c) => createOrOpenHub(c.app, c.settings, "week", c.date, false),
   },
   {
-    title: "Open month note",
+    title: "Open Month Note",
     icon: "calendar-with-checkmark",
     handler: (c) => createOrOpenHub(c.app, c.settings, "month", c.date, false),
   },
   {
-    title: "Open year note",
+    title: "Open Year Note",
     icon: "calendar-with-checkmark",
     handler: (c) => createOrOpenHub(c.app, c.settings, "year", c.date, false),
   },
   {
-    title: "Reveal day note in file explorer",
+    title: "Reveal in File Navigation",
     icon: "folder",
     isVisible: (c) => c.kind === "day",
     handler: (c) => revealHub(c, "day"),
   },
   {
-    title: "Reveal week note in file explorer",
+    title: "Reveal in File Navigation",
     icon: "folder",
     isVisible: (c) => c.kind === "week",
     handler: (c) => revealHub(c, "week"),

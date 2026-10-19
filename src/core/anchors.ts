@@ -34,16 +34,16 @@ export function startOfWeek(date: Moment, useIso: boolean): Moment {
 
 /**
  * Human-readable week range for the `{weekRange}` token (and the week's `name:`).
- *   - same calendar month -> "MMMDD-DD_YYYY"     (e.g. "Mar23-29_2026")
- *   - cross month         -> "MMMDD-MMMDD_YYYY"  (e.g. "Apr27-May03_2026")
- * Year = the END day's year (Dec29 2025 -> Jan04 2026 -> "..._2026").
+ *   - same calendar month -> "MMMDD-DD-YYYY"     (e.g. "Mar23-29-2026")
+ *   - cross month         -> "MMMDD-MMMDD-YYYY"  (e.g. "Apr27-May03-2026")
+ * Year = the END day's year (Dec29 2025 -> Jan04 2026 -> "...-2026").
  */
 export function weekRange(start: Moment): string {
   const end = start.clone().add(6, "days"); // Mon -> Sun inclusive
   if (start.format("YYYYMM") === end.format("YYYYMM")) {
-    return `${start.format("MMMDD")}-${end.format("DD")}_${end.format("YYYY")}`;
+    return `${start.format("MMMDD")}-${end.format("DD")}-${end.format("YYYY")}`;
   }
-  return `${start.format("MMMDD")}-${end.format("MMMDD")}_${end.format("YYYY")}`;
+  return `${start.format("MMMDD")}-${end.format("MMMDD")}-${end.format("YYYY")}`;
 }
 
 function capitalize(period: PeriodKind): string {

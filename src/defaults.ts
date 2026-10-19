@@ -25,12 +25,12 @@ export const DEFAULTS: ISettings = {
   showHubCues: true,
 
   // Naming (basics)
-  prefix: "_HUB_", // blank => names like `Day_Jun04_2026`
+  prefix: "@", // blank => names like `Day-Jun04-2026`
   formats: {
-    day: "MMMDD_YYYY", // Jun04_2026
-    month: "MMM_YYYY", // Jun_2026
+    day: "MMMDD-YYYY", // Jun04-2026
+    month: "MMM-YYYY", // Jun-2026
     year: "YYYY", // 2026
-    weekId: "WW_GGGG", // 23_2026 (ISO week + ISO week-year)
+    weekId: "WW-GGGG", // 23-2026 (ISO week + ISO week-year)
   },
   useIsoWeeks: true,
 
@@ -40,42 +40,42 @@ export const DEFAULTS: ISettings = {
 
   // Advanced: per-period naming patterns
   folderPatterns: {
-    day: "Year_{year}/Month_{month}/Week_{weekId}/Day_{day}",
-    week: "Year_{year}/Month_{month}/Week_{weekId}",
-    month: "Year_{year}/Month_{month}",
-    year: "Year_{year}",
+    day: "Year-{year}/Month-{month}/Week-{weekId}/Day-{day}",
+    week: "Year-{year}/Month-{month}/Week-{weekId}",
+    month: "Year-{year}/Month-{month}",
+    year: "Year-{year}",
   },
   filePatterns: {
-    day: "{prefix}Day_{day}",
-    week: "{prefix}Week_{weekId}",
-    month: "{prefix}Month_{month}",
-    year: "{prefix}Year_{year}",
+    day: "{prefix}Day-{day}",
+    week: "{prefix}Week-{weekId}",
+    month: "{prefix}Month-{month}",
+    year: "{prefix}Year-{year}",
   },
   computedFields: {
     day: [
-      { field: "name", formula: "{prefix}Day_{day}" },
-      { field: "related_notes", formula: "[[{prefix}Week_{weekId}]]", list: true },
+      { field: "name", formula: "\"{prefix}Day-{day}\"" },
+      { field: "related_notes", formula: "[[{prefix}Week-{weekId}]]", list: true },
     ],
     week: [
-      // the FILE uses {weekId} (23_2026), but the NAME keeps the human range.
-      { field: "name", formula: "{prefix}Week_{weekRange}" },
-      { field: "related_notes", formula: "[[{prefix}Month_{month}]]", list: true },
+      // the FILE uses {weekId} (23-2026), but the NAME keeps the human range.
+      { field: "name", formula: "\"{prefix}Week-{weekRange}\"" },
+      { field: "related_notes", formula: "[[{prefix}Month-{month}]]", list: true },
     ],
     month: [
-      { field: "name", formula: "{prefix}Month_{month}" },
-      { field: "related_notes", formula: "[[{prefix}Year_{year}]]", list: true },
+      { field: "name", formula: "\"{prefix}Month-{month}\"" },
+      { field: "related_notes", formula: "[[{prefix}Year-{year}]]", list: true },
     ],
     year: [
-      { field: "name", formula: "{prefix}Year_{year}" },
+      { field: "name", formula: "\"{prefix}Year-{year}\"" },
       { field: "related_notes", formula: "[[_MOC_Templates]]", list: true },
     ],
   },
 
-  // The day Overview note (right-click only; lives in the Day folder)
-  overviewFile: "_Overview_Day_{day}",
+  // The day Docket note (right-click only; lives in the Day folder)
+  overviewFile: "{prefix}Docket-{day}",
   overviewFields: [
-    { field: "name", formula: "_Overview_Day_{day}" },
-    { field: "related_notes", formula: "[[{prefix}Day_{day}]]", list: true },
+    { field: "name", formula: "\"{prefix}Docket-{day}\"" },
+    { field: "related_notes", formula: "[[{prefix}Day-{day}]]", list: true },
   ],
 };
 

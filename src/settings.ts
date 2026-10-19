@@ -133,7 +133,7 @@ export class CalendarSettingsTab extends PluginSettingTab {
     this.addTemplatePath("Week template", "week");
     this.addTemplatePath("Month template", "month");
     this.addTemplatePath("Year template", "year");
-    this.addTemplatePath("Day Overview template", "overview");
+    this.addTemplatePath("Docket template", "overview");
 
     // --- Advanced (collapsible) ---
     const adv = this.containerEl.createEl("details");

@@ -180,7 +180,7 @@ export async function createOrOpenOverview(
     settings,
     plan,
     templatePath,
-    "New Day Overview",
+    "New Docket Note",
     inNewSplit,
     cb
   );
